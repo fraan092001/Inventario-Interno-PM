@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Control de Stock · EPP &amp; Consumibles</title>
+
+<!-- Librerías de React y Tailwind -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Librerías de Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+
+  :root{
+    --bg-0:#070c17; --bg-1:#0d1526; --bg-2:#111d33;
+    --glass:rgba(255,255,255,0.045); --glass-brd:rgba(255,255,255,0.09);
+    --glass-hi:rgba(255,255,255,0.08);
+    --ink-1:#e6ecf5; --ink-2:#93a2ba; --ink-3:#5f6f8a;
+    --accent:#38bdf8; --accent-2:#22d3ee;
+    --ok:#34d399; --warn:#f59e0b; --crit:#fb7185;
+  }
+  .light{
+    --bg-0:#eef2f8; --bg-1:#e5ebf3; --bg-2:#dbe3ee;
+    --glass:rgba(255,255,255,0.55); --glass-brd:rgba(15,23,42,0.08);
+    --glass-hi:rgba(255,255,255,0.75);
+    --ink-1:#0f172a; --ink-2:#475569; --ink-3:#7c8aa0;
+    --accent:#0284c7; --accent-2:#0891b2;
+    --ok:#059669; --warn:#b45309; --crit:#be123c;
+  }
+  html,body{ height:100%; }
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(56,189,248,0.14), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(52,211,153,0.10), transparent 55%),
+      linear-gradient(180deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+    background-attachment:fixed;
+    color:var(--ink-1);
+    transition:background .4s ease,color .3s ease;
+  }
+  .font-display{ font-family:'Space Grotesk',sans-serif; }
+  .font-mono{ font-family:'JetBrains Mono',monospace; }
+
+  .glass{
+    background:var(--glass);
+    border:1px solid var(--glass-brd);
+    backdrop-filter:blur(18px) saturate(140%);
+    -webkit-backdrop-filter:blur(18px) saturate(140%);
+    box-shadow:0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 var(--glass-hi);
+  }
+  .light .glass{ box-shadow:0 8px 24px rgba(15,23,42,0.06), inset 0 1px 0 var(--glass-hi); }
+
+  .glass-tight{
+    background:var(--glass);
+    border:1px solid var(--glass-brd);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+  }
+
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb{ background:var(--glass-brd); border-radius:99px; }
+
+  .gauge-track{ background:rgba(255,255,255,0.06); }
+  .light .gauge-track{ background:rgba(15,23,42,0.08); }
+
+  /* Animaciones */
+  @keyframes rise{ from{ transform:scaleX(0);} to{ transform:scaleX(1);} }
+  .rise{ transform-origin:left; animation:rise 900ms cubic-bezier(.16,1,.3,1) both; }
+
+  @keyframes riseVertical{ from{ transform:scaleY(0);} to{ transform:scaleY(1);} }
+  .rise-vertical{ transform-origin:bottom; animation:riseVertical 900ms cubic-bezier(.16,1,.3,1) both; }
+
+  @keyframes fadeUp{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  .fade-up{ animation:fadeUp .45s ease both; }
+
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator { filter:invert(0.6); cursor:pointer; }
+  .light input[type="date"]::-webkit-calendar-picker-indicator,
+  .light input[type="month"]::-webkit-calendar-picker-indicator { filter:invert(0.3); }
+
+  select, input{ color-scheme: dark; }
+  .light select, .light input{ color-scheme: light; }
+
+  @media (prefers-reduced-motion: reduce){
+    .rise, .rise-vertical, .fade-up{ animation:none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+// CONFIGURACIÓN DE FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyBR2ys7NKaQBjyecgtKYePeT1wOHylUT0o",
+  authDomain: "inventario-interno-pm.firebaseapp.com",
+  projectId: "inventario-interno-pm",
+  storageBucket: "inventario-interno-pm.firebasestorage.app",
+  messagingSenderId: "878061364582",
+  appId: "1:878061364582:web:0c9e7f2368eeea94a7d4a7"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+const { useState, useMemo, useEffect } = React;
+
+/* Iconos */
+const Icon = ({ path, className = "w-5 h-5", children }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+);
+const IconBox = (p) => <Icon {...p}><path d="M21 8l-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></Icon>;
+const IconAlert = (p) => <Icon {...p}><path d="M10.3 3.9 1.9 18a1.8 1.8 0 0 0 1.6 2.7h17a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 16.5h.01"/></Icon>;
+const IconLayers = (p) => <Icon {...p}><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></Icon>;
+const IconGauge = (p) => <Icon {...p}><path d="M12 14 15.5 9"/><circle cx="12" cy="14" r="1.2" fill="currentColor" stroke="none"/><path d="M4.9 19a9 9 0 1 1 14.2 0"/></Icon>;
+const IconPlus = (p) => <Icon {...p}><path d="M12 5v14M5 12h14"/></Icon>;
+const IconMinus = (p) => <Icon {...p}><path d="M5 12h14"/></Icon>;
+const IconTrash = (p) => <Icon {...p}><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-.9 14a2 2 0 0 1-2 1.9H7.9a2 2 0 0 1-2-1.9L5 6"/><path d="M10 11v6M14 11v6"/></Icon>;
+const IconSun = (p) => <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></Icon>;
+const IconMoon = (p) => <Icon {...p}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></Icon>;
+const IconTrendUp = (p) => <Icon {...p}><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></Icon>;
+const IconTrendDown = (p) => <Icon {...p}><path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/></Icon>;
+const IconStar = (p) => <Icon {...p}><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8L12 3.5Z"/></Icon>;
+const IconCal = (p) => <Icon {...p}><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v3M16 3v3"/></Icon>;
+const IconEdit = (p) => <Icon {...p}><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></Icon>;
+const IconLock = (p) => <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>;
+const IconUnlock = (p) => <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></Icon>;
+const IconUsers = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
+const IconX = (p) => <Icon {...p}><path d="M18 6L6 18M6 6l12 12"/></Icon>;
+const IconRecycle = (p) => <Icon {...p}><path d="M4 11.2V7c0-1.7 1.3-3 3-3h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7"/><path d="M7 15l-3 3-3-3"/><path d="M17 11l3-3 3 3"/></Icon>;
+
+const CATS = [
+  { id: "cabeza",      nombre: "Protección Cabeza",     color: "#38bdf8" },
+  { id: "manos",       nombre: "Protección Manos",      color: "#fbbf24" },
+  { id: "ocular",      nombre: "Protección Ocular",     color: "#34d399" },
+  { id: "auditiva",    nombre: "Protección Auditiva",   color: "#a78bfa" },
+  { id: "respiratoria",nombre: "Protección Respiratoria", color: "#fb7185" },
+  { id: "calzado",     nombre: "Calzado de Seguridad",  color: "#fb923c" },
+  { id: "limpieza",    nombre: "Limpieza e Higiene",    color: "#22d3ee" },
+  { id: "mantenimiento",nombre:"Consumo Mantenimiento", color: "#f43f5e" },
+];
+const catInfo = (id) => CATS.find(c => c.id === id) || CATS[0];
+
+const USUARIOS = [
+  "Carlos Nieto",
+  "Claudio Dominguez",
+  "Diego Londero",
+  "Fernando Ludueña",
+  "Francesco Silvano",
+  "Guadalupe Carrizo"
+].sort((a, b) => a.localeCompare(b));
+
+const OPERARIOS = [
+  "Ana Lopez",
+  "Cristian Gomez",
+  "Daniela Vargas",
+  "Esteban Silva",
+  "Jorge Ramirez",
+  "Martin Gonzalez",
+  "Sofia Perez"
+].sort((a, b) => a.localeCompare(b));
+
+const todayISO = () => new Date().toISOString().slice(0,10);
+const currentMonthISO = () => new Date().toISOString().slice(0,7);
+const fmtDate = (iso) => {
+  const [y,m,d] = iso.split("-");
+  return `${d}/${m}`;
+};
+
+function SummaryCard({ icon, label, value, sub, tone, onClick }){
+  const toneMap = {
+    accent: { ring:"text-[var(--accent)]", bg:"bg-[var(--accent)]/12" },
+    ok:     { ring:"text-[var(--ok)]",     bg:"bg-[var(--ok)]/12" },
+    warn:   { ring:"text-[var(--warn)]",   bg:"bg-[var(--warn)]/12" },
+    crit:   { ring:"text-[var(--crit)]",   bg:"bg-[var(--crit)]/12" },
+  }[tone || "accent"];
+  
+  return (
+    <div 
+      className={`glass rounded-2xl p-5 fade-up ${onClick ? 'cursor-pointer hover:bg-white/5 transition-all active:scale-95' : ''}`}
+      onClick={onClick}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wider" style={{color:"var(--ink-3)"}}>{label}</p>
+          <p className="font-display text-3xl font-semibold mt-1.5" style={{color:"var(--ink-1)"}}>{value}</p>
+          {sub && <p className="text-xs mt-1.5" style={{color: onClick ? "var(--accent)" : "var(--ink-2)"}}>{sub}</p>}
+        </div>
+        <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${toneMap.bg} ${toneMap.ring}`}>
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockGauge({ cat, actual, max }){
+  const pct = Math.max(4, Math.min(100, (actual / max) * 100));
+  return (
+    <div className="fade-up">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: cat.color }} />
+          <span className="text-sm truncate" style={{color:"var(--ink-1)"}}>{cat.nombre}</span>
+        </div>
+        <span className="font-mono text-xs shrink-0 ml-2" style={{color:"var(--ink-2)"}}>{actual} un</span>
+      </div>
+      <div className="h-2.5 rounded-full gauge-track overflow-hidden">
+        <div className="h-full rounded-full rise" style={{ width: `${pct}%`, background: cat.color }} />
+      </div>
+    </div>
+  );
+}
+
+function RankBar({ item, index, max }){
+  const pct = Math.max(6, (item.consumoMes / max) * 100);
+  const cat = catInfo(item.categoria);
+  return (
+    <div className="flex items-center gap-3 fade-up">
+      <span className="font-display text-xs w-5 text-center shrink-0" style={{color:"var(--ink-3)"}}>{String(index+1).padStart(2,"0")}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-sm truncate" style={{color:"var(--ink-1)"}}>{item.nombre}</p>
+          <p className="font-mono text-xs shrink-0" style={{color:"var(--ink-2)"}}>{item.consumoMes}<span style={{color:"var(--ink-3)"}}>/mes</span></p>
+        </div>
+        <div className="h-1.5 rounded-full gauge-track overflow-hidden mt-1">
+          <div className="h-full rounded-full rise" style={{ width: `${pct}%`, background: cat.color }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [dark, setDark] = useState(true);
+  const [items, setItems] = useState([]);
+  const [movs, setMovs] = useState([]);
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState("todas");
+  const [toast, setToast] = useState(null);
+  const [mesHistorico, setMesHistorico] = useState(currentMonthISO());
+  
+  const [editModal, setEditModal] = useState(null);
+  const [showCriticosModal, setShowCriticosModal] = useState(false);
+  const [showCategoriasModal, setShowCategoriasModal] = useState(false);
+  
+  const [filtroAnio, setFiltroAnio] = useState(() => new Date().getFullYear().toString());
+
+  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem("app_admin") === "true");
+  const [usuarioActivo, setUsuarioActivo] = useState(() => localStorage.getItem("app_user") || "");
+
+  const [form, setForm] = useState({
+    tipo: "consumo",
+    nombreItem: "",
+    categoriaNueva: "mantenimiento",
+    cantidad: "",
+    fecha: todayISO(),
+    operario: "",
+    esLavado: false // NUEVO: Flag de EPP Lavado
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", !dark);
+  }, [dark]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    if(usuarioActivo) localStorage.setItem("app_user", usuarioActivo);
+  }, [usuarioActivo]);
+
+  useEffect(() => {
+    sessionStorage.setItem("app_admin", isAdmin);
+    if (!isAdmin) {
+      setForm(f => ({...f, tipo: "consumo", esLavado: false}));
+      setShowCriticosModal(false);
+      setShowCategoriasModal(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    const unsubItems = db.collection('items').onSnapshot(snap => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setItems(data);
+    });
+    const unsubMovs = db.collection('movimientos').onSnapshot(snap => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMovs(data);
+    });
+    return () => { unsubItems(); unsubMovs(); };
+  }, []);
+
+  const itemsOrdenados = useMemo(() => {
+    return [...items].sort((a,b) => a.nombre.localeCompare(b.nombre));
+  }, [items]);
+
+  const stockTotal = useMemo(() => items.reduce((s,i) => s + i.stock, 0), [items]);
+  const listaCriticos = useMemo(() => items.filter(i => i.stock <= i.minimo), [items]);
+  const itemsCriticos = listaCriticos.length;
+  const consumoMesTotal = useMemo(() => items.reduce((s,i) => s + i.consumoMes, 0), [items]);
+  const categoriasActivas = useMemo(() => new Set(items.map(i => i.categoria)).size, [items]);
+
+  const stockPorCategoria = useMemo(() => {
+    return CATS.map(c => ({
+      cat: c,
+      actual: items.filter(i => i.categoria === c.id).reduce((s,i) => s + i.stock, 0),
+      minimo: items.filter(i => i.categoria === c.id).reduce((s,i) => s + i.minimo, 0),
+    })).filter(r => r.actual > 0 || r.minimo > 0);
+  }, [items]);
+  const maxCategoria = Math.max(1, ...stockPorCategoria.map(r => r.actual));
+
+  const topUsados = useMemo(() => [...items].sort((a,b) => b.consumoMes - a.consumoMes).slice(0,5), [items]);
+  const maxConsumo = Math.max(1, ...topUsados.map(i => i.consumoMes));
+
+  const movimientosRecientes = useMemo(() => [...movs].sort((a,b) => b.fecha.localeCompare(a.fecha)), [movs]);
+
+  const aniosDisponibles = useMemo(() => {
+    const anios = new Set(movs.map(m => m.fecha.substring(0, 4)));
+    anios.add(new Date().getFullYear().toString()); 
+    return Array.from(anios).sort((a, b) => b.localeCompare(a)); 
+  }, [movs]);
+
+  const consumoAnualPorCategoria = useMemo(() => {
+    const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(filtroAnio));
+    const agrupado = {};
+    consumos.forEach(m => {
+      const item = items.find(i => i.id === m.itemId);
+      if (item) agrupado[item.categoria] = (agrupado[item.categoria] || 0) + m.cantidad;
+    });
+    return CATS.map(c => ({ cat: c, total: agrupado[c.id] || 0 }))
+               .filter(g => g.total > 0)
+               .sort((a, b) => b.total - a.total);
+  }, [movs, items, filtroAnio]);
+  
+  const maxConsumoAnual = Math.max(1, ...consumoAnualPorCategoria.map(c => c.total));
+
+  const consumosHistoricos = useMemo(() => {
+    const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(mesHistorico));
+    const agrupado = {};
+    consumos.forEach(m => {
+      const item = items.find(i => i.id === m.itemId);
+      if (!item) return;
+      agrupado[item.categoria] = (agrupado[item.categoria] || 0) + m.cantidad;
+    });
+    return CATS.map(c => ({ cat: c, total: agrupado[c.id] || 0 })).filter(g => g.total > 0);
+  }, [movs, items, mesHistorico]);
+  const maxHistorico = Math.max(1, ...consumosHistoricos.map(c => c.total));
+
+  // DASHBOARD SUPERVISORES ACTUALIZADO (TOTAL, NUEVO, LAVADO)
+  const metricasSupervisores = useMemo(() => {
+    const consumos = movs.filter(m => m.tipo === "consumo" && m.usuario && m.usuario !== "Desconocido");
+    const agrupado = {};
+    USUARIOS.forEach(u => agrupado[u] = { total: 0, totalNuevos: 0, totalLavados: 0, categorias: {} });
+    
+    consumos.forEach(m => {
+      const usuario = m.usuario;
+      if (agrupado[usuario]) {
+        agrupado[usuario].total += m.cantidad;
+        if (m.esLavado) agrupado[usuario].totalLavados += m.cantidad;
+        else agrupado[usuario].totalNuevos += m.cantidad;
+
+        const item = items.find(i => i.id === m.itemId);
+        if (item) {
+          if (!agrupado[usuario].categorias[item.categoria]) {
+             agrupado[usuario].categorias[item.categoria] = { total: 0, itemsDetalle: {} };
+          }
+          agrupado[usuario].categorias[item.categoria].total += m.cantidad;
+          agrupado[usuario].categorias[item.categoria].itemsDetalle[item.nombre] = 
+            (agrupado[usuario].categorias[item.categoria].itemsDetalle[item.nombre] || 0) + m.cantidad;
+        }
+      }
+    });
+    
+    return Object.entries(agrupado)
+      .map(([nombre, data]) => ({ nombre, ...data }))
+      .filter(x => x.total > 0)
+      .sort((a,b) => b.total - a.total); 
+  }, [movs, items]);
+  
+  const maxGastoSuper = Math.max(1, ...metricasSupervisores.map(s => s.total));
+
+  const itemsFiltrados = useMemo(() => {
+    return itemsOrdenados.filter(i => (catFilter === "todas" || i.categoria === catFilter) && i.nombre.toLowerCase().includes(query.toLowerCase()));
+  }, [itemsOrdenados, query, catFilter]);
+
+  function toggleAdmin() {
+    if (isAdmin) {
+      setIsAdmin(false);
+      setToast({ type:"ok", msg:"Sesión de administrador cerrada." });
+    } else {
+      const pin = window.prompt("Ingresar PIN para habilitar herramientas de gestión:");
+      if (pin === "1234") {
+        setIsAdmin(true);
+        setToast({ type:"ok", msg:"Modo Administrador activado." });
+      } else if (pin) {
+        setToast({ type:"crit", msg:"PIN incorrecto. Acceso denegado." });
+      }
+    }
+  }
+
+  async function togglePedidoStatus(item) {
+    try {
+      await db.collection('items').doc(item.id).update({
+        pedidoRealizado: !item.pedidoRealizado
+      });
+    } catch (error) {
+      setToast({ type: "crit", msg: "Error al actualizar el estado del pedido." });
+    }
+  }
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    if (!usuarioActivo) {
+      setToast({ type:"crit", msg:"Por favor seleccioná tu nombre arriba." });
+      return;
+    }
+
+    const cantidadStr = form.cantidad;
+    const cantidad = cantidadStr === "" ? 0 : Number(cantidadStr);
+    const nombreLimpio = form.nombreItem.trim();
+    
+    if (cantidad < 0 || !nombreLimpio) {
+      setToast({ type:"crit", msg:"Ingresá un ítem y una cantidad válida (0 o más)." });
+      return;
+    }
+
+    if (form.tipo === "consumo" && cantidad <= 0) {
+      setToast({ type:"crit", msg:"Para registrar un consumo, la cantidad debe ser mayor a 0." });
+      return;
+    }
+    
+    if (form.tipo === "consumo" && !form.operario) {
+      setToast({ type:"crit", msg:"Por favor seleccioná el operario que recibe el material." });
+      return;
+    }
+
+    let itemActual = items.find(i => i.nombre.toLowerCase() === nombreLimpio.toLowerCase());
+    const isLavado = form.tipo === "consumo" && form.esLavado;
+
+    if (!itemActual) {
+      if (form.tipo === "consumo") {
+        setToast({ type:"crit", msg:"El material no existe. Debes registrar un ingreso primero." });
+        return;
+      }
+      
+      const newItem = {
+        nombre: nombreLimpio,
+        categoria: form.categoriaNueva,
+        stock: cantidad,
+        minimo: 10,
+        unidad: "un",
+        consumoMes: 0,
+        pedidoRealizado: cantidad <= 10
+      };
+      
+      try {
+        const docRef = await db.collection('items').add(newItem);
+        if (cantidad > 0) {
+          await db.collection('movimientos').add({
+            itemId: docRef.id,
+            tipo: form.tipo,
+            cantidad,
+            fecha: form.fecha,
+            usuario: usuarioActivo,
+            operario: null,
+            esLavado: false
+          });
+        }
+        setToast({ type:"ok", msg:`Catálogo actualizado: ${nombreLimpio} guardado.` });
+      } catch (error) {
+        setToast({ type:"crit", msg:"Error de conexión al guardar." });
+      }
+
+    } else {
+      if (cantidad === 0) {
+        setToast({ type:"warn", msg:"El material ya existe. Para ajustar el stock, usá el lápiz de edición." });
+        return;
+      }
+
+      // Si es lavado, no descuenta del stock. Si es nuevo, verifica disponibilidad.
+      if (form.tipo === "consumo" && !isLavado && cantidad > itemActual.stock) {
+        setToast({ type:"warn", msg:`Stock insuficiente de "${itemActual.nombre}" (disponible: ${itemActual.stock}).` });
+        return;
+      }
+      
+      // La fórmula ignora la resta si isLavado es true
+      const newStock = form.tipo === "ingreso" 
+        ? itemActual.stock + cantidad 
+        : (isLavado ? itemActual.stock : itemActual.stock - cantidad);
+        
+      const newConsumo = form.tipo === "ingreso" ? itemActual.consumoMes : itemActual.consumoMes + cantidad;
+      
+      const isCritical = newStock <= itemActual.minimo;
+      const autoPedidoStatus = isCritical ? (itemActual.pedidoRealizado || false) : false;
+
+      try {
+        await db.collection('items').doc(itemActual.id).update({
+          stock: newStock,
+          consumoMes: newConsumo,
+          pedidoRealizado: autoPedidoStatus
+        });
+        await db.collection('movimientos').add({
+          itemId: itemActual.id,
+          tipo: form.tipo,
+          cantidad,
+          fecha: form.fecha,
+          usuario: usuarioActivo,
+          operario: form.tipo === "consumo" ? form.operario : null,
+          esLavado: isLavado
+        });
+        setToast({ type: form.tipo === "ingreso" ? "ok" : "accent", msg: `${form.tipo === "ingreso" ? "Ingreso" : (isLavado ? "Entrega (Lavado)" : "Consumo")} registrado de ${itemActual.nombre}.` });
+      } catch (error) {
+        setToast({ type:"crit", msg:"Error de conexión al actualizar." });
+      }
+    }
+
+    setForm(f => ({ ...f, cantidad: "", nombreItem: "", operario: "", esLavado: false }));
+  }
+
+  async function eliminarMov(mov){
+    const item = items.find(i => i.id === mov.itemId);
+    try {
+      await db.collection('movimientos').doc(mov.id).delete();
+      if (item) {
+        // Solo revertimos el stock si NO era un elemento lavado
+        let newStock = item.stock;
+        if (mov.tipo === "ingreso") {
+            newStock = Math.max(0, item.stock - mov.cantidad);
+        } else if (mov.tipo === "consumo" && !mov.esLavado) {
+            newStock = item.stock + mov.cantidad;
+        }
+
+        const newConsumo = mov.tipo === "ingreso" ? item.consumoMes : Math.max(0, item.consumoMes - mov.cantidad);
+        
+        const isCritical = newStock <= item.minimo;
+        const autoPedidoStatus = isCritical ? (item.pedidoRealizado || false) : false;
+
+        await db.collection('items').doc(item.id).update({ 
+          stock: newStock, 
+          consumoMes: newConsumo,
+          pedidoRealizado: autoPedidoStatus
+        });
+      }
+    } catch(err){
+      setToast({ type:"crit", msg:"Error al intentar eliminar el movimiento." });
+    }
+  }
+
+  async function handleEditItem() {
+    if (!editModal.nombre.trim()) return setToast({ type:"warn", msg:"El nombre no puede estar vacío." });
+    try {
+      const newStock = Number(editModal.stock) || 0;
+      const newMinimo = Number(editModal.minimo) || 0;
+      const isCritical = newStock <= newMinimo;
+      
+      await db.collection('items').doc(editModal.id).update({
+        nombre: editModal.nombre.trim(),
+        categoria: editModal.categoria,
+        minimo: newMinimo,
+        stock: newStock,
+        pedidoRealizado: isCritical ? (editModal.pedidoRealizado || false) : false
+      });
+      setToast({ type: "ok", msg: "Ítem actualizado correctamente." });
+      setEditModal(null);
+    } catch (error) {
+      setToast({ type: "crit", msg: "Error al actualizar." });
+    }
+  }
+
+  async function handleDeleteItem() {
+    if (!window.confirm(`¿Estás seguro de eliminar "${editModal.nombre}"?`)) return;
+    try {
+      await db.collection('items').doc(editModal.id).delete();
+      setToast({ type: "ok", msg: "Ítem eliminado del inventario." });
+      setEditModal(null);
+    } catch(err) {
+      setToast({ type: "crit", msg: "Error al eliminar el ítem." });
+    }
+  }
+
+  const toastColor = toast ? ({ ok:"var(--ok)", warn:"var(--warn)", crit:"var(--crit)", accent:"var(--accent)" }[toast.type]) : null;
+
+  return (
+    <div className="min-h-screen pb-16">
+      <header className="sticky top-0 z-30 backdrop-blur-xl" style={{borderBottom:"1px solid var(--glass-brd)", background:"color-mix(in srgb, var(--bg-0) 78%, transparent)"}}>
+        <div className="max-w-7xl mx-auto px-5 sm:px-8 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={toggleAdmin} className="h-10 w-10 rounded-xl grid place-items-center shrink-0 transition-all hover:scale-105" style={{background:"linear-gradient(135deg, var(--accent), var(--accent-2))"}}>
+              {isAdmin ? <IconUnlock className="w-5 h-5 text-white" /> : <IconLock className="w-5 h-5 text-white" />}
+            </button>
+            <div className="min-w-0">
+              <h1 className="font-display text-lg sm:text-xl font-semibold leading-tight truncate">Control de Stock</h1>
+              <span className="text-xs" style={{color: isAdmin ? "var(--warn)" : "var(--ok)"}}>{isAdmin ? "⚠️ MODO ADMINISTRADOR" : "🟢 Conectado a la nube"}</span>
+            </div>
+          </div>
+          <button onClick={() => setDark(d => !d)} className="glass-tight h-10 w-10 rounded-xl grid place-items-center transition-transform active:scale-90 shrink-0">
+            {dark ? <IconSun className="w-5 h-5" style={{color:"var(--warn)"}} /> : <IconMoon className="w-5 h-5" style={{color:"var(--accent)"}} />}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-5 sm:px-8 mt-6 space-y-6">
+        {isAdmin && (
+          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 fade-up">
+            <SummaryCard icon={<IconBox className="w-5 h-5" />} label="Stock total" value={stockTotal.toLocaleString("es-AR")} sub={`${items.length} ítems`} tone="accent" />
+            
+            <SummaryCard 
+              icon={<IconAlert className="w-5 h-5" />} 
+              label="Ítems críticos" 
+              value={itemsCriticos} 
+              sub="Tocá para ver pedidos" 
+              tone={itemsCriticos > 0 ? "crit" : "ok"} 
+              onClick={() => setShowCriticosModal(true)}
+            />
+            
+            <SummaryCard 
+              icon={<IconLayers className="w-5 h-5" />} 
+              label="Categorías" 
+              value={categoriasActivas} 
+              sub="Tocá para ver balance anual" 
+              tone="accent" 
+              onClick={() => setShowCategoriasModal(true)}
+            />
+            
+            <SummaryCard icon={<IconGauge className="w-5 h-5" />} label="Consumo del mes" value={consumoMesTotal.toLocaleString("es-AR")} sub="Unidades usadas" tone="warn" />
+          </section>
+        )}
+
+        <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 space-y-6">
+            
+            {/* GRÁFICO DE TRIPLE BARRA ACTUALIZADO */}
+            {isAdmin && (
+              <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <IconUsers className="w-5 h-5" style={{color:"var(--accent)"}} />
+                    <h2 className="font-display text-base font-semibold">Consumo histórico por persona</h2>
+                  </div>
+                </div>
+
+                {metricasSupervisores.length === 0 ? (
+                  <p className="text-sm py-8 text-center" style={{color:"var(--ink-3)"}}>No hay registros válidos de consumos todavía.</p>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 justify-center mb-6 px-2 border-b pb-4" style={{borderColor:"var(--glass-brd)"}}>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: "var(--ink-3)" }}></span><span className="text-xs font-semibold" style={{color:"var(--ink-2)"}}>TOTAL (POR CATEGORÍA)</span></div>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: "var(--accent)" }}></span><span className="text-xs font-semibold" style={{color:"var(--ink-2)"}}>NUEVOS</span></div>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: "var(--ok)" }}></span><span className="text-xs font-semibold" style={{color:"var(--ink-2)"}}>LAVADOS (REUTILIZADOS)</span></div>
+                    </div>
+
+                    <div className="relative h-72 w-full flex items-end justify-around border-l border-b pb-2 pt-6 pr-2 pl-6 sm:pl-8" style={{borderColor:"var(--glass-brd)"}}>
+                      <div className="absolute left-0 bottom-2 w-full border-t border-dashed z-0" style={{borderColor:"var(--glass-brd)"}}></div>
+                      <div className="absolute left-0 top-[50%] w-full border-t border-dashed z-0" style={{borderColor:"var(--glass-brd)"}}>
+                         <span className="absolute -top-2.5 -left-6 sm:-left-8 text-[10px] w-5 sm:w-6 text-right" style={{color:"var(--ink-3)"}}>{Math.round(maxGastoSuper / 2)}</span>
+                      </div>
+                      <div className="absolute left-0 top-6 w-full border-t border-dashed z-0" style={{borderColor:"var(--glass-brd)"}}>
+                         <span className="absolute -top-2.5 -left-6 sm:-left-8 text-[10px] w-5 sm:w-6 text-right" style={{color:"var(--ink-3)"}}>{maxGastoSuper}</span>
+                      </div>
+
+                      {metricasSupervisores.map(superv => (
+                        <div key={superv.nombre} className="flex flex-col items-center z-10 group relative h-full justify-end">
+                           <div className="absolute -top-8 glass-tight px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md text-center opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50" style={{color:"var(--ink-1)"}}>
+                             Total: {superv.total} <br/> (Nuevos: {superv.totalNuevos} | Lavados: {superv.totalLavados})
+                           </div>
+
+                           {/* GRUPO DE 3 BARRAS */}
+                           <div className="flex items-end gap-1 h-full w-[48px] sm:w-[64px] justify-center">
+                             
+                             {/* 1. BARRA TOTAL APILADA */}
+                             <div className="w-[12px] sm:w-[16px] flex flex-col-reverse justify-start rounded-t overflow-hidden rise-vertical cursor-pointer" style={{height: `${(superv.total / maxGastoSuper) * 100}%`}}>
+                               {Object.entries(superv.categorias).map(([catId, catData]) => {
+                                  const cat = catInfo(catId);
+                                  const heightPct = (catData.total / superv.total) * 100;
+                                  return (
+                                    <div key={catId} className="w-full relative border-t border-black/10 last:border-0 hover:brightness-110 transition-all" style={{ height: `${heightPct}%`, background: cat.color }}></div>
+                                  )
+                               })}
+                             </div>
+
+                             {/* 2. BARRA NUEVOS */}
+                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalNuevos / maxGastoSuper) * 100}%`, background: "var(--accent)"}}></div>
+                             
+                             {/* 3. BARRA LAVADOS */}
+                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalLavados / maxGastoSuper) * 100}%`, background: "var(--ok)"}}></div>
+                             
+                           </div>
+
+                           <span className="text-[10px] sm:text-xs text-center mt-3 truncate w-full" style={{color:"var(--ink-2)", maxWidth:"64px"}} title={superv.nombre}>
+                             {superv.nombre.split(" ")[0]}
+                             {superv.nombre.split(" ")[1] ? ` ${superv.nombre.split(" ")[1].charAt(0)}.` : ""}
+                           </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="font-display text-base font-semibold">Stock por categoría</h2>
+                </div>
+                {stockPorCategoria.length === 0 && <p className="text-sm py-4 text-center" style={{color:"var(--ink-3)"}}>Agregá tu primer ingreso para ver las métricas.</p>}
+                <div className="space-y-4">
+                  {stockPorCategoria.map(r => (
+                    <StockGauge key={r.cat.id} cat={r.cat} actual={r.actual} max={maxCategoria} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="font-display text-base font-semibold">Consumo histórico por categoría</h2>
+                  <input type="month" value={mesHistorico} onChange={e => setMesHistorico(e.target.value)} className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none" style={{color:"var(--ink-1)"}} />
+                </div>
+                {consumosHistoricos.length === 0 && <p className="text-sm py-6 text-center" style={{color:"var(--ink-3)"}}>No hay consumos registrados en este mes.</p>}
+                <div className="space-y-4">
+                  {consumosHistoricos.map(r => (
+                    <StockGauge key={r.cat.id} cat={r.cat} actual={r.total} max={maxHistorico} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="glass rounded-2xl p-5 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+                <h2 className="font-display text-base font-semibold">Inventario de planta</h2>
+                <div className="flex items-center gap-2">
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar ítem..." className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none w-32 sm:w-44" style={{color:"var(--ink-1)"}} />
+                  <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className="glass-tight rounded-lg text-sm px-2.5 py-1.5 outline-none" style={{color:"var(--ink-1)"}}>
+                    <option value="todas">Todas las categorías</option>
+                    {CATS.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto -mx-2">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wide" style={{color:"var(--ink-3)"}}>
+                      <th className="text-left font-medium px-2 pb-2">Ítem</th>
+                      <th className="text-left font-medium px-2 pb-2">Categoría</th>
+                      <th className="text-right font-medium px-2 pb-2">Stock</th>
+                      <th className="text-right font-medium px-2 pb-2">Mínimo</th>
+                      {isAdmin && <th className="text-right font-medium px-2 pb-2 w-10"></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {itemsFiltrados.length === 0 && (
+                      <tr><td colSpan={isAdmin ? 5 : 4} className="text-center py-6" style={{color:"var(--ink-3)"}}>El inventario está vacío.</td></tr>
+                    )}
+                    {itemsFiltrados.map(i => {
+                      const cat = catInfo(i.categoria);
+                      return (
+                        <tr key={i.id} className="border-t group hover:bg-white/5 transition-colors" style={{borderColor:"var(--glass-brd)"}}>
+                          <td className="px-2 py-2.5" style={{color:"var(--ink-1)"}}>{i.nombre}</td>
+                          <td className="px-2 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs"><span className="h-1.5 w-1.5 rounded-full" style={{background:cat.color}} />{cat.nombre}</span></td>
+                          <td className="px-2 py-2.5 text-right font-mono" style={{color:"var(--ink-1)"}}>{i.stock} {i.unidad}</td>
+                          <td className="px-2 py-2.5 text-right font-mono" style={{color:"var(--ink-3)"}}>{i.minimo}</td>
+                          {isAdmin && (
+                            <td className="px-2 py-2.5 text-right">
+                              <button onClick={() => setEditModal(i)} className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all">
+                                <IconEdit className="w-4 h-4" style={{color:"var(--ink-2)"}} />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <form onSubmit={handleSubmit} className="glass rounded-2xl p-5 sm:p-6 space-y-4">
+              <h2 className="font-display text-base font-semibold">Registro de entrega</h2>
+              
+              <div>
+                <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>¿Quién está realizando la carga?</label>
+                <select value={usuarioActivo} onChange={e => setUsuarioActivo(e.target.value)} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none font-medium" style={{color:"var(--accent)", border:"1px solid var(--accent)"}}>
+                  <option value="" disabled>Seleccioná tu nombre...</option>
+                  {USUARIOS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+
+              {isAdmin && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <button type="button" onClick={() => setForm(f => ({...f, tipo:"consumo", esLavado: false}))} className="rounded-xl py-2 text-sm font-medium flex items-center justify-center gap-1.5" style={form.tipo==="consumo" ? { background:"var(--crit)", color:"#fff" } : { border:"1px solid var(--glass-brd)", color:"var(--ink-2)" }}><IconMinus className="w-3.5 h-3.5" /> Consumo</button>
+                  <button type="button" onClick={() => setForm(f => ({...f, tipo:"ingreso", esLavado: false}))} className="rounded-xl py-2 text-sm font-medium flex items-center justify-center gap-1.5" style={form.tipo==="ingreso" ? { background:"var(--ok)", color:"#06251b" } : { border:"1px solid var(--glass-brd)", color:"var(--ink-2)" }}><IconPlus className="w-3.5 h-3.5" /> Ingreso</button>
+                </div>
+              )}
+
+              {isAdmin ? (
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Ítem (Buscar o crear nuevo)</label>
+                  <input list="lista-materiales" value={form.nombreItem} onChange={e => setForm(f => ({...f, nombreItem: e.target.value}))} placeholder="Ej: Guantes de nitrilo" className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}} />
+                  <datalist id="lista-materiales">{itemsOrdenados.map(i => <option key={i.id} value={i.nombre} />)}</datalist>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Ítem a retirar</label>
+                  <select value={form.nombreItem} onChange={e => setForm(f => ({...f, nombreItem: e.target.value}))} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}}>
+                    <option value="" disabled>Seleccioná un material...</option>
+                    {itemsOrdenados.map(i => <option key={i.id} value={i.nombre}>{i.nombre}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* SELECTOR DE MATERIAL LAVADO (SOLO EN CONSUMO) */}
+              {form.tipo === "consumo" && (
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Estado del material</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setForm(f => ({...f, esLavado: false}))} className="rounded-lg py-1.5 text-xs font-semibold transition-all" style={!form.esLavado ? {background:"var(--accent)", color:"#000"} : {border:"1px solid var(--glass-brd)", color:"var(--ink-3)"}}>Nuevo de Caja</button>
+                    <button type="button" onClick={() => setForm(f => ({...f, esLavado: true}))} className="rounded-lg py-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1" style={form.esLavado ? {background:"var(--ok)", color:"#000"} : {border:"1px solid var(--glass-brd)", color:"var(--ink-3)"}}><IconRecycle className="w-3.5 h-3.5" /> Es Lavado</button>
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && form.tipo === "ingreso" && (
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Categoría (Solo si el ítem es nuevo)</label>
+                  <select value={form.categoriaNueva} onChange={e => setForm(f => ({...f, categoriaNueva: e.target.value}))} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}}>
+                    {CATS.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Cantidad</label>
+                  <input type="number" min="0" value={form.cantidad} onChange={e => setForm(f => ({...f, cantidad: e.target.value}))} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none font-mono" style={{color:"var(--ink-1)"}} />
+                </div>
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Fecha</label>
+                  <input type="date" value={form.fecha} onChange={e => setForm(f => ({...f, fecha: e.target.value}))} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}} />
+                </div>
+              </div>
+
+              {form.tipo === "consumo" && (
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>¿A qué operario se le entrega?</label>
+                  <select value={form.operario} onChange={e => setForm(f => ({...f, operario: e.target.value}))} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}}>
+                    <option value="" disabled>Seleccioná al operario receptor...</option>
+                    <option value="Uso propio (Supervisor)">✋ Uso propio (Para mí)</option>
+                    {OPERARIOS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <button type="submit" className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{background: isAdmin && form.tipo === "ingreso" ? "var(--ok)" : "linear-gradient(135deg, var(--accent), var(--accent-2))", color:"#04121a"}}>
+                {isAdmin && form.tipo === "ingreso" ? <IconPlus className="w-4 h-4" /> : <IconMinus className="w-4 h-4" />} 
+                {isAdmin && form.tipo === "ingreso" ? "Registrar Ingreso" : "Descontar de Stock"}
+              </button>
+            </form>
+
+            {isAdmin && (
+              <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
+                <div className="flex items-center gap-2 mb-5"><IconStar className="w-4 h-4" style={{color:"var(--warn)"}} /><h2 className="font-display text-base font-semibold">Más usados este mes</h2></div>
+                {topUsados.length === 0 && <p className="text-sm py-4 text-center" style={{color:"var(--ink-3)"}}>Aún no hay consumos.</p>}
+                <div className="space-y-4">{topUsados.map((item, idx) => <RankBar key={item.id} item={item} index={idx} max={maxConsumo} />)}</div>
+              </div>
+            )}
+
+            <div className="glass rounded-2xl p-5 sm:p-6">
+              <div className="flex items-center gap-2 mb-4"><IconCal className="w-4 h-4" style={{color:"var(--accent)"}} /><h2 className="font-display text-base font-semibold">Movimientos recientes</h2></div>
+              <ul className="space-y-1 max-h-72 overflow-y-auto pr-1">
+                {movimientosRecientes.length === 0 && <p className="text-sm py-4 text-center" style={{color:"var(--ink-3)"}}>Sin movimientos todavía.</p>}
+                {movimientosRecientes.map(m => {
+                  const item = items.find(i => i.id === m.itemId);
+                  if (!item) return null;
+                  const isIngreso = m.tipo === "ingreso";
+                  return (
+                    <li key={m.id} className="flex items-center gap-3 py-2 group hover:bg-white/5 rounded-lg px-2 transition-colors">
+                      <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0" style={{ background: isIngreso ? "rgba(52,211,153,0.14)" : "rgba(251,113,133,0.14)", color: isIngreso ? "var(--ok)" : "var(--crit)" }}>{isIngreso ? <IconTrendUp className="w-4 h-4" /> : <IconTrendDown className="w-4 h-4" />}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm flex items-center gap-1.5 truncate" style={{color:"var(--ink-1)"}}>
+                          {item.nombre} 
+                          {m.esLavado && <span className="px-1.5 rounded text-[10px] uppercase font-bold tracking-widest" style={{background:"var(--ok)", color:"#000"}}>Lavado</span>}
+                        </p>
+                        <p className="text-xs flex gap-2 mt-0.5" style={{color:"var(--ink-3)"}}>
+                          <span>{fmtDate(m.fecha)}</span>
+                          {isAdmin && (
+                            <span className="truncate flex-1 font-medium" style={{color:"var(--accent)"}}>
+                              • {m.usuario || "Sin nombre"} {m.operario ? `→ a ${m.operario}` : ""}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <span className="font-mono text-xs shrink-0" style={{color: isIngreso ? "var(--ok)" : "var(--crit)"}}>{isIngreso ? "+" : "−"}{m.cantidad}</span>
+                      {isAdmin && (
+                        <button onClick={() => eliminarMov(m)} className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-white/10 transition-colors"><IconTrash className="w-5 h-5" style={{color:"var(--ink-3)"}} /></button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* MODAL DE ÍTEMS CRÍTICOS */}
+      {isAdmin && showCriticosModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-up" style={{background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)"}}>
+          <div className="glass rounded-2xl p-6 w-full max-w-lg max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-lg font-semibold flex items-center gap-2" style={{color:"var(--ink-1)"}}>
+                <IconAlert className="w-5 h-5" style={{color:"var(--crit)"}} /> Panel de Pedidos
+              </h2>
+              <button onClick={() => setShowCriticosModal(false)} className="p-2 rounded-lg opacity-70 hover:opacity-100 hover:bg-white/10 transition-all" style={{color:"var(--ink-2)"}}>
+                <IconX className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto pr-2 space-y-3 flex-1">
+              {listaCriticos.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm" style={{color:"var(--ink-3)"}}>¡Excelente! No hay ningún material por debajo del mínimo configurado.</p>
+                </div>
+              ) : (
+                listaCriticos.map(item => (
+                  <div key={item.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl gap-4" style={{background:"rgba(255,255,255,0.03)", border:"1px solid var(--glass-brd)"}}>
+                    <div>
+                      <p className="font-medium text-sm mb-1" style={{color:"var(--ink-1)"}}>{item.nombre}</p>
+                      <p className="text-xs flex gap-3" style={{color:"var(--ink-3)"}}>
+                        <span>Stock: <strong style={{color:"var(--crit)"}}>{item.stock}</strong></span>
+                        <span>Mínimo: {item.minimo}</span>
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => togglePedidoStatus(item)}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold transition-all shrink-0 sm:w-auto w-full text-center"
+                      style={
+                        item.pedidoRealizado 
+                        ? { background: "rgba(52,211,153,0.15)", color: "var(--ok)", border: "1px solid rgba(52,211,153,0.3)" }
+                        : { background: "rgba(251,113,133,0.15)", color: "var(--crit)", border: "1px solid rgba(251,113,133,0.3)" }
+                      }
+                    >
+                      {item.pedidoRealizado ? '✓ Pedido en curso' : 'Falta pedir'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONSUMO ANUAL DE CATEGORÍAS */}
+      {isAdmin && showCategoriasModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-up" style={{background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)"}}>
+          <div className="glass rounded-2xl p-6 w-full max-w-lg max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-lg font-semibold flex items-center gap-2" style={{color:"var(--ink-1)"}}>
+                <IconLayers className="w-5 h-5" style={{color:"var(--accent)"}} /> Balance Anual por Categoría
+              </h2>
+              <button onClick={() => setShowCategoriasModal(false)} className="p-2 rounded-lg opacity-70 hover:opacity-100 hover:bg-white/10 transition-all" style={{color:"var(--ink-2)"}}>
+                <IconX className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{borderColor:"var(--glass-brd)"}}>
+              <span className="text-sm font-medium" style={{color:"var(--ink-2)"}}>Seleccionar ejercicio:</span>
+              <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none font-mono" style={{color:"var(--ink-1)"}}>
+                {aniosDisponibles.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+
+            <div className="overflow-y-auto pr-2 space-y-4 flex-1">
+              {consumoAnualPorCategoria.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm" style={{color:"var(--ink-3)"}}>No hay consumos registrados en {filtroAnio}.</p>
+                </div>
+              ) : (
+                consumoAnualPorCategoria.map(r => (
+                  <StockGauge key={r.cat.id} cat={r.cat} actual={r.total} max={maxConsumoAnual} />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN */}
+      {isAdmin && editModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-up" style={{background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)"}}>
+          <div className="glass rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-lg font-semibold" style={{color:"var(--ink-1)"}}>Editar Ítem</h2>
+              <button onClick={handleDeleteItem} title="Eliminar ítem" className="p-2 rounded-lg opacity-70 hover:opacity-100 hover:bg-red-500/20 transition-all" style={{color:"var(--crit)"}}>
+                <IconTrash className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Nombre del material</label>
+                <input type="text" value={editModal.nombre} onChange={e => setEditModal({...editModal, nombre: e.target.value})} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}} />
+              </div>
+              <div>
+                <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Categoría correcta</label>
+                <select value={editModal.categoria} onChange={e => setEditModal({...editModal, categoria: e.target.value})} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none" style={{color:"var(--ink-1)"}}>
+                  {CATS.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Stock actual</label>
+                  <input type="number" min="0" value={editModal.stock} onChange={e => setEditModal({...editModal, stock: e.target.value})} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none font-mono" style={{color:"var(--ink-1)"}} />
+                </div>
+                <div>
+                  <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Mínimo (Alerta)</label>
+                  <input type="number" min="0" value={editModal.minimo} onChange={e => setEditModal({...editModal, minimo: e.target.value})} className="w-full glass-tight rounded-lg px-3 py-2 text-sm outline-none font-mono" style={{color:"var(--ink-1)"}} />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setEditModal(null)} className="flex-1 py-2 rounded-xl text-sm font-medium transition-colors hover:bg-white/5" style={{border:"1px solid var(--glass-brd)", color:"var(--ink-2)"}}>Cancelar</button>
+              <button onClick={handleEditItem} className="flex-1 py-2 rounded-xl text-sm font-semibold transition-transform active:scale-95" style={{background:"linear-gradient(135deg, var(--accent), var(--accent-2))", color:"#04121a"}}>Guardar cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST DE NOTIFICACIÓN */}
+      {toast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 fade-up">
+          <div className="glass rounded-xl px-4 py-3 flex items-center gap-2.5 shadow-lg">
+            <span className="h-2 w-2 rounded-full" style={{background: toastColor}} />
+            <span className="text-sm" style={{color:"var(--ink-1)"}}>{toast.msg}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
