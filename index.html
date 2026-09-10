@@ -70,6 +70,10 @@
   .gauge-track{ background:rgba(255,255,255,0.06); }
   .light .gauge-track{ background:rgba(15,23,42,0.08); }
 
+  /* Ajustes para acordeones */
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+
   /* Animaciones */
   @keyframes rise{ from{ transform:scaleX(0);} to{ transform:scaleX(1);} }
   .rise{ transform-origin:left; animation:rise 900ms cubic-bezier(.16,1,.3,1) both; }
@@ -158,25 +162,13 @@ const USUARIOS = [
 ].sort((a, b) => a.localeCompare(b));
 
 const OPERARIOS = [
-  "Leandro Marconetto",
-  "Fernando Morales",
-  "Fabio Perez",
-  "Marcos Maldonado",
-  "Matias Goyochea",
-  "Esteban Tuyaret",
-  "Chicho Guerrero",
-  "Alberto Zarate",
-  "Pablo Perez",
-  "Angel Abella",
-  "Agustin Tassi",
-  "Luis Olsak",
-  "Ruben Rodriguez",
-  "Pablo Noriega",
-  "Dario Juarez",
-  "Andres Bustos",
-  "Daniel Gutierrez",
-  "Diego Diaz",
-  "Matias Mercado",
+  "Ana Lopez",
+  "Cristian Gomez",
+  "Daniela Vargas",
+  "Esteban Silva",
+  "Jorge Ramirez",
+  "Martin Gonzalez",
+  "Sofia Perez"
 ].sort((a, b) => a.localeCompare(b));
 
 const todayISO = () => new Date().toISOString().slice(0,10);
@@ -216,7 +208,7 @@ function SummaryCard({ icon, label, value, sub, tone, onClick }){
 function StockGauge({ cat, actual, max }){
   const pct = Math.max(4, Math.min(100, (actual / max) * 100));
   return (
-    <div className="fade-up">
+    <div className="fade-up w-full">
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           <span className="h-2 w-2 rounded-full shrink-0" style={{ background: cat.color }} />
@@ -257,16 +249,18 @@ function App(){
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState("todas");
   const [toast, setToast] = useState(null);
+  
   const [mesHistorico, setMesHistorico] = useState(currentMonthISO());
+  const [mesSupervisores, setMesSupervisores] = useState(currentMonthISO()); // Filtro nuevo para supervisores
+  const [filtroAnio, setFiltroAnio] = useState(() => new Date().getFullYear().toString());
   
   const [editModal, setEditModal] = useState(null);
   const [showCriticosModal, setShowCriticosModal] = useState(false);
   const [showCategoriasModal, setShowCategoriasModal] = useState(false);
-  
-  const [filtroAnio, setFiltroAnio] = useState(() => new Date().getFullYear().toString());
 
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem("app_admin") === "true");
   const [usuarioActivo, setUsuarioActivo] = useState(() => localStorage.getItem("app_user") || "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [form, setForm] = useState({
     tipo: "consumo",
@@ -275,7 +269,7 @@ function App(){
     cantidad: "",
     fecha: todayISO(),
     operario: "",
-    esLavado: false // NUEVO: Flag de EPP Lavado
+    esLavado: false
   });
 
   useEffect(() => {
@@ -343,16 +337,27 @@ function App(){
     return Array.from(anios).sort((a, b) => b.localeCompare(a)); 
   }, [movs]);
 
+  // CÁLCULO ANUAL ACTUALIZADO PARA DESGLOSE POR ÍTEM
   const consumoAnualPorCategoria = useMemo(() => {
     const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(filtroAnio));
     const agrupado = {};
+    
     consumos.forEach(m => {
       const item = items.find(i => i.id === m.itemId);
-      if (item) agrupado[item.categoria] = (agrupado[item.categoria] || 0) + m.cantidad;
+      if (item) {
+        if (!agrupado[item.categoria]) agrupado[item.categoria] = { total: 0, items: {} };
+        agrupado[item.categoria].total += m.cantidad;
+        agrupado[item.categoria].items[item.nombre] = (agrupado[item.categoria].items[item.nombre] || 0) + m.cantidad;
+      }
     });
-    return CATS.map(c => ({ cat: c, total: agrupado[c.id] || 0 }))
-               .filter(g => g.total > 0)
-               .sort((a, b) => b.total - a.total);
+    
+    return CATS.map(c => ({ 
+      cat: c, 
+      total: agrupado[c.id]?.total || 0,
+      itemsDetalle: agrupado[c.id]?.items || {}
+    }))
+    .filter(g => g.total > 0)
+    .sort((a, b) => b.total - a.total);
   }, [movs, items, filtroAnio]);
   
   const maxConsumoAnual = Math.max(1, ...consumoAnualPorCategoria.map(c => c.total));
@@ -369,9 +374,9 @@ function App(){
   }, [movs, items, mesHistorico]);
   const maxHistorico = Math.max(1, ...consumosHistoricos.map(c => c.total));
 
-  // DASHBOARD SUPERVISORES ACTUALIZADO (TOTAL, NUEVO, LAVADO)
   const metricasSupervisores = useMemo(() => {
-    const consumos = movs.filter(m => m.tipo === "consumo" && m.usuario && m.usuario !== "Desconocido");
+    // AHORA FILTRA TAMBIÉN POR EL MES SELECCIONADO
+    const consumos = movs.filter(m => m.tipo === "consumo" && m.usuario && m.usuario !== "Desconocido" && m.fecha.startsWith(mesSupervisores));
     const agrupado = {};
     USUARIOS.forEach(u => agrupado[u] = { total: 0, totalNuevos: 0, totalLavados: 0, categorias: {} });
     
@@ -398,7 +403,7 @@ function App(){
       .map(([nombre, data]) => ({ nombre, ...data }))
       .filter(x => x.total > 0)
       .sort((a,b) => b.total - a.total); 
-  }, [movs, items]);
+  }, [movs, items, mesSupervisores]);
   
   const maxGastoSuper = Math.max(1, ...metricasSupervisores.map(s => s.total));
 
@@ -466,6 +471,7 @@ function App(){
         return;
       }
       
+      setIsSubmitting(true);
       const newItem = {
         nombre: nombreLimpio,
         categoria: form.categoriaNueva,
@@ -490,8 +496,11 @@ function App(){
           });
         }
         setToast({ type:"ok", msg:`Catálogo actualizado: ${nombreLimpio} guardado.` });
+        setForm(f => ({ ...f, cantidad: "", nombreItem: "", operario: "", esLavado: false }));
       } catch (error) {
         setToast({ type:"crit", msg:"Error de conexión al guardar." });
+      } finally {
+        setIsSubmitting(false);
       }
 
     } else {
@@ -500,13 +509,12 @@ function App(){
         return;
       }
 
-      // Si es lavado, no descuenta del stock. Si es nuevo, verifica disponibilidad.
       if (form.tipo === "consumo" && !isLavado && cantidad > itemActual.stock) {
         setToast({ type:"warn", msg:`Stock insuficiente de "${itemActual.nombre}" (disponible: ${itemActual.stock}).` });
         return;
       }
       
-      // La fórmula ignora la resta si isLavado es true
+      setIsSubmitting(true);
       const newStock = form.tipo === "ingreso" 
         ? itemActual.stock + cantidad 
         : (isLavado ? itemActual.stock : itemActual.stock - cantidad);
@@ -532,12 +540,13 @@ function App(){
           esLavado: isLavado
         });
         setToast({ type: form.tipo === "ingreso" ? "ok" : "accent", msg: `${form.tipo === "ingreso" ? "Ingreso" : (isLavado ? "Entrega (Lavado)" : "Consumo")} registrado de ${itemActual.nombre}.` });
+        setForm(f => ({ ...f, cantidad: "", nombreItem: "", operario: "", esLavado: false }));
       } catch (error) {
         setToast({ type:"crit", msg:"Error de conexión al actualizar." });
+      } finally {
+        setIsSubmitting(false);
       }
     }
-
-    setForm(f => ({ ...f, cantidad: "", nombreItem: "", operario: "", esLavado: false }));
   }
 
   async function eliminarMov(mov){
@@ -545,7 +554,6 @@ function App(){
     try {
       await db.collection('movimientos').doc(mov.id).delete();
       if (item) {
-        // Solo revertimos el stock si NO era un elemento lavado
         let newStock = item.stock;
         if (mov.tipo === "ingreso") {
             newStock = Math.max(0, item.stock - mov.cantidad);
@@ -652,18 +660,18 @@ function App(){
         <section className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="xl:col-span-2 space-y-6">
             
-            {/* GRÁFICO DE TRIPLE BARRA ACTUALIZADO */}
             {isAdmin && (
               <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
-                <div className="flex items-center justify-between mb-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                   <div className="flex items-center gap-2">
                     <IconUsers className="w-5 h-5" style={{color:"var(--accent)"}} />
                     <h2 className="font-display text-base font-semibold">Consumo histórico por persona</h2>
                   </div>
+                  <input type="month" value={mesSupervisores} onChange={e => setMesSupervisores(e.target.value)} className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none" style={{color:"var(--ink-1)"}} />
                 </div>
 
                 {metricasSupervisores.length === 0 ? (
-                  <p className="text-sm py-8 text-center" style={{color:"var(--ink-3)"}}>No hay registros válidos de consumos todavía.</p>
+                  <p className="text-sm py-8 text-center" style={{color:"var(--ink-3)"}}>No hay registros válidos en este mes.</p>
                 ) : (
                   <div className="space-y-6">
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 justify-center mb-6 px-2 border-b pb-4" style={{borderColor:"var(--glass-brd)"}}>
@@ -687,25 +695,33 @@ function App(){
                              Total: {superv.total} <br/> (Nuevos: {superv.totalNuevos} | Lavados: {superv.totalLavados})
                            </div>
 
-                           {/* GRUPO DE 3 BARRAS */}
                            <div className="flex items-end gap-1 h-full w-[48px] sm:w-[64px] justify-center">
                              
-                             {/* 1. BARRA TOTAL APILADA */}
                              <div className="w-[12px] sm:w-[16px] flex flex-col-reverse justify-start rounded-t overflow-hidden rise-vertical cursor-pointer" style={{height: `${(superv.total / maxGastoSuper) * 100}%`}}>
                                {Object.entries(superv.categorias).map(([catId, catData]) => {
                                   const cat = catInfo(catId);
                                   const heightPct = (catData.total / superv.total) * 100;
+                                  
+                                  const detalleTooltip = Object.entries(catData.itemsDetalle)
+                                    .sort((a,b) => b[1] - a[1])
+                                    .map(([nomItem, cantItem]) => `${cantItem}x ${nomItem}`)
+                                    .join('\n');
+                                  const textoCompleto = `${catData.total} un. de ${cat.nombre}\n\nDetalle:\n${detalleTooltip}`;
+
                                   return (
-                                    <div key={catId} className="w-full relative border-t border-black/10 last:border-0 hover:brightness-110 transition-all" style={{ height: `${heightPct}%`, background: cat.color }}></div>
+                                    <div 
+                                      key={catId} 
+                                      className="w-full relative border-t border-black/10 last:border-0 hover:brightness-110 transition-all" 
+                                      style={{ height: `${heightPct}%`, background: cat.color }}
+                                      title={textoCompleto}
+                                    ></div>
                                   )
                                })}
                              </div>
 
-                             {/* 2. BARRA NUEVOS */}
-                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalNuevos / maxGastoSuper) * 100}%`, background: "var(--accent)"}}></div>
+                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalNuevos / maxGastoSuper) * 100}%`, background: "var(--accent)"}} title={`Nuevos: ${superv.totalNuevos} unidades`}></div>
                              
-                             {/* 3. BARRA LAVADOS */}
-                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalLavados / maxGastoSuper) * 100}%`, background: "var(--ok)"}}></div>
+                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalLavados / maxGastoSuper) * 100}%`, background: "var(--ok)"}} title={`Lavados: ${superv.totalLavados} unidades`}></div>
                              
                            </div>
 
@@ -836,7 +852,6 @@ function App(){
                 </div>
               )}
 
-              {/* SELECTOR DE MATERIAL LAVADO (SOLO EN CONSUMO) */}
               {form.tipo === "consumo" && (
                 <div>
                   <label className="text-xs mb-1.5 block" style={{color:"var(--ink-3)"}}>Estado del material</label>
@@ -878,9 +893,24 @@ function App(){
                 </div>
               )}
 
-              <button type="submit" className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{background: isAdmin && form.tipo === "ingreso" ? "var(--ok)" : "linear-gradient(135deg, var(--accent), var(--accent-2))", color:"#04121a"}}>
-                {isAdmin && form.tipo === "ingreso" ? <IconPlus className="w-4 h-4" /> : <IconMinus className="w-4 h-4" />} 
-                {isAdmin && form.tipo === "ingreso" ? "Registrar Ingreso" : "Descontar de Stock"}
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className={`w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2 transition-all ${isSubmitting ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'}`} 
+                style={{background: isAdmin && form.tipo === "ingreso" ? "var(--ok)" : "linear-gradient(135deg, var(--accent), var(--accent-2))", color:"#04121a"}}
+              >
+                {isSubmitting ? (
+                  <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  isAdmin && form.tipo === "ingreso" ? <IconPlus className="w-4 h-4" /> : <IconMinus className="w-4 h-4" />
+                )}
+                {isSubmitting 
+                  ? "Procesando..." 
+                  : (isAdmin && form.tipo === "ingreso" ? "Registrar Ingreso" : "Descontar de Stock")
+                }
               </button>
             </form>
 
@@ -977,7 +1007,7 @@ function App(){
         </div>
       )}
 
-      {/* MODAL DE CONSUMO ANUAL DE CATEGORÍAS */}
+      {/* MODAL DE CONSUMO ANUAL DE CATEGORÍAS (AHORA DESPLEGABLE) */}
       {isAdmin && showCategoriasModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-up" style={{background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)"}}>
           <div className="glass rounded-2xl p-6 w-full max-w-lg max-h-[85vh] flex flex-col">
@@ -997,15 +1027,42 @@ function App(){
               </select>
             </div>
 
-            <div className="overflow-y-auto pr-2 space-y-4 flex-1">
+            <div className="overflow-y-auto pr-2 flex-1">
               {consumoAnualPorCategoria.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-sm" style={{color:"var(--ink-3)"}}>No hay consumos registrados en {filtroAnio}.</p>
                 </div>
               ) : (
-                consumoAnualPorCategoria.map(r => (
-                  <StockGauge key={r.cat.id} cat={r.cat} actual={r.total} max={maxConsumoAnual} />
-                ))
+                consumoAnualPorCategoria.map(r => {
+                  const pct = Math.max(4, Math.min(100, (r.total / maxConsumoAnual) * 100));
+                  return (
+                    <details key={r.cat.id} className="group glass-tight rounded-xl mb-3 overflow-hidden transition-all">
+                      <summary className="p-4 cursor-pointer outline-none hover:bg-white/5 transition-colors flex flex-col gap-2">
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-full shrink-0" style={{ background: r.cat.color }} />
+                            <span className="text-sm font-semibold" style={{color:"var(--ink-1)"}}>{r.cat.nombre}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-xs" style={{color:"var(--ink-2)"}}>{r.total} un</span>
+                            <svg className="w-4 h-4 transition-transform group-open:rotate-180" style={{color:"var(--ink-3)"}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+                          </div>
+                        </div>
+                        <div className="h-2 rounded-full gauge-track overflow-hidden w-full mt-1">
+                          <div className="h-full rounded-full rise" style={{ width: `${pct}%`, background: r.cat.color }} />
+                        </div>
+                      </summary>
+                      <div className="px-4 pb-4 pt-2 border-t text-sm space-y-1" style={{borderColor:"var(--glass-brd)"}}>
+                        {Object.entries(r.itemsDetalle).sort((a,b)=>b[1]-a[1]).map(([nom, cant]) => (
+                          <div key={nom} className="flex justify-between py-1.5 border-b last:border-0" style={{borderColor:"var(--glass-brd)"}}>
+                             <span style={{color:"var(--ink-2)"}}>{nom}</span>
+                             <span className="font-mono font-medium text-xs" style={{color:"var(--ink-1)"}}>{cant}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  );
+                })
               )}
             </div>
           </div>
