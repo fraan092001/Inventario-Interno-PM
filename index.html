@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- SISTEMA ANTI-CACHÉ -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
+
 <title>Control de Stock · EPP &amp; Consumibles</title>
 
 <!-- Librerías de React y Tailwind -->
@@ -69,9 +71,6 @@
 
   ::-webkit-scrollbar{ width:8px; height:8px; }
   ::-webkit-scrollbar-thumb{ background:var(--glass-brd); border-radius:99px; }
-
-  .gauge-track{ background:rgba(255,255,255,0.06); }
-  .light .gauge-track{ background:rgba(15,23,42,0.08); }
 
   /* Ajustes para acordeones */
   summary { list-style: none; }
@@ -164,26 +163,15 @@ const USUARIOS = [
   "Guadalupe Carrizo"
 ].sort((a, b) => a.localeCompare(b));
 
+// IMPORTANTE: REEMPLAZAR ESTOS NOMBRES POR LOS OPERARIOS REALES
 const OPERARIOS = [
-  "Marconetto",
-  "Morales",
-  "Perez F.",
-  "Maldonado",
-  "Goyochea",
-  "Tuyaret",
-  "Guerrero",
-  "Zarate",
-  "Perez P.",
-  "Abella",
-  "Tassi",
-  "Olsak",
-  "Rodriguez",
-  "Noriega",
-  "Juarez",
-  "Bustos",
-  "Gutierrez",
-  "Diaz",
-  "Mercado",
+  "Ana Lopez",
+  "Cristian Gomez",
+  "Daniela Vargas",
+  "Esteban Silva",
+  "Jorge Ramirez",
+  "Martin Gonzalez",
+  "Sofia Perez"
 ].sort((a, b) => a.localeCompare(b));
 
 const todayISO = () => new Date().toISOString().slice(0,10);
@@ -265,8 +253,8 @@ function App(){
   const [catFilter, setCatFilter] = useState("todas");
   const [toast, setToast] = useState(null);
   
-  const [mesHistorico, setMesHistorico] = useState(currentMonthISO());
-  const [mesSupervisores, setMesSupervisores] = useState(currentMonthISO()); // Filtro nuevo para supervisores
+  const [mesSupervisores, setMesSupervisores] = useState(currentMonthISO());
+  const [mesOperarios, setMesOperarios] = useState(currentMonthISO());
   const [filtroAnio, setFiltroAnio] = useState(() => new Date().getFullYear().toString());
   
   const [editModal, setEditModal] = useState(null);
@@ -352,7 +340,6 @@ function App(){
     return Array.from(anios).sort((a, b) => b.localeCompare(a)); 
   }, [movs]);
 
-  // CÁLCULO ANUAL ACTUALIZADO PARA DESGLOSE POR ÍTEM
   const consumoAnualPorCategoria = useMemo(() => {
     const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(filtroAnio));
     const agrupado = {};
@@ -377,32 +364,50 @@ function App(){
   
   const maxConsumoAnual = Math.max(1, ...consumoAnualPorCategoria.map(c => c.total));
 
-  const consumosHistoricos = useMemo(() => {
-    const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(mesHistorico));
+  // DATOS PARA ENTREGAS POR OPERARIO (Nueva solapa)
+  const entregasOperarios = useMemo(() => {
+    const consumos = movs.filter(m => m.tipo === "consumo" && m.fecha.startsWith(mesOperarios));
     const agrupado = {};
+
     consumos.forEach(m => {
+      const receptor = m.operario || "Uso propio (Supervisor)";
+      if (!agrupado[receptor]) agrupado[receptor] = { total: 0, items: {} };
+      
+      agrupado[receptor].total += m.cantidad;
       const item = items.find(i => i.id === m.itemId);
-      if (!item) return;
-      agrupado[item.categoria] = (agrupado[item.categoria] || 0) + m.cantidad;
+      const nombreItem = item ? item.nombre : "Desconocido";
+      agrupado[receptor].items[nombreItem] = (agrupado[receptor].items[nombreItem] || 0) + m.cantidad;
     });
-    return CATS.map(c => ({ cat: c, total: agrupado[c.id] || 0 })).filter(g => g.total > 0);
-  }, [movs, items, mesHistorico]);
-  const maxHistorico = Math.max(1, ...consumosHistoricos.map(c => c.total));
+
+    return Object.entries(agrupado)
+      .map(([nombre, data]) => ({ nombre, ...data }))
+      .sort((a,b) => b.total - a.total);
+  }, [movs, items, mesOperarios]);
 
   const metricasSupervisores = useMemo(() => {
-    // AHORA FILTRA TAMBIÉN POR EL MES SELECCIONADO
     const consumos = movs.filter(m => m.tipo === "consumo" && m.usuario && m.usuario !== "Desconocido" && m.fecha.startsWith(mesSupervisores));
     const agrupado = {};
-    USUARIOS.forEach(u => agrupado[u] = { total: 0, totalNuevos: 0, totalLavados: 0, categorias: {} });
+    USUARIOS.forEach(u => agrupado[u] = { 
+      total: 0, totalNuevos: 0, totalLavados: 0, 
+      categorias: {}, itemsNuevos: {}, itemsLavados: {} 
+    });
     
     consumos.forEach(m => {
       const usuario = m.usuario;
       if (agrupado[usuario]) {
         agrupado[usuario].total += m.cantidad;
-        if (m.esLavado) agrupado[usuario].totalLavados += m.cantidad;
-        else agrupado[usuario].totalNuevos += m.cantidad;
-
+        
         const item = items.find(i => i.id === m.itemId);
+        const nombreItem = item ? item.nombre : "Desconocido";
+
+        if (m.esLavado) {
+          agrupado[usuario].totalLavados += m.cantidad;
+          agrupado[usuario].itemsLavados[nombreItem] = (agrupado[usuario].itemsLavados[nombreItem] || 0) + m.cantidad;
+        } else {
+          agrupado[usuario].totalNuevos += m.cantidad;
+          agrupado[usuario].itemsNuevos[nombreItem] = (agrupado[usuario].itemsNuevos[nombreItem] || 0) + m.cantidad;
+        }
+
         if (item) {
           if (!agrupado[usuario].categorias[item.categoria]) {
              agrupado[usuario].categorias[item.categoria] = { total: 0, itemsDetalle: {} };
@@ -626,6 +631,16 @@ function App(){
 
   const toastColor = toast ? ({ ok:"var(--ok)", warn:"var(--warn)", crit:"var(--crit)", accent:"var(--accent)" }[toast.type]) : null;
 
+  // Función para armar los tooltips de los gráficos de forma consistente
+  const buildTooltip = (titulo, objItems) => {
+    if (Object.keys(objItems).length === 0) return titulo;
+    const detalle = Object.entries(objItems)
+      .sort((a,b) => b[1] - a[1])
+      .map(([nom, cant]) => `${cant}x ${nom}`)
+      .join('\n');
+    return `${titulo}\n\nDetalle:\n${detalle}`;
+  };
+
   return (
     <div className="min-h-screen pb-16">
       <header className="sticky top-0 z-30 backdrop-blur-xl" style={{borderBottom:"1px solid var(--glass-brd)", background:"color-mix(in srgb, var(--bg-0) 78%, transparent)"}}>
@@ -712,31 +727,35 @@ function App(){
 
                            <div className="flex items-end gap-1 h-full w-[48px] sm:w-[64px] justify-center">
                              
+                             {/* BARRA APILADA POR CATEGORÍAS */}
                              <div className="w-[12px] sm:w-[16px] flex flex-col-reverse justify-start rounded-t overflow-hidden rise-vertical cursor-pointer" style={{height: `${(superv.total / maxGastoSuper) * 100}%`}}>
                                {Object.entries(superv.categorias).map(([catId, catData]) => {
                                   const cat = catInfo(catId);
                                   const heightPct = (catData.total / superv.total) * 100;
-                                  
-                                  const detalleTooltip = Object.entries(catData.itemsDetalle)
-                                    .sort((a,b) => b[1] - a[1])
-                                    .map(([nomItem, cantItem]) => `${cantItem}x ${nomItem}`)
-                                    .join('\n');
-                                  const textoCompleto = `${catData.total} un. de ${cat.nombre}\n\nDetalle:\n${detalleTooltip}`;
-
                                   return (
                                     <div 
                                       key={catId} 
                                       className="w-full relative border-t border-black/10 last:border-0 hover:brightness-110 transition-all" 
                                       style={{ height: `${heightPct}%`, background: cat.color }}
-                                      title={textoCompleto}
+                                      title={buildTooltip(`${catData.total} un. de ${cat.nombre}`, catData.itemsDetalle)}
                                     ></div>
                                   )
                                })}
                              </div>
 
-                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalNuevos / maxGastoSuper) * 100}%`, background: "var(--accent)"}} title={`Nuevos: ${superv.totalNuevos} unidades`}></div>
+                             {/* BARRA NUEVOS */}
+                             <div 
+                               className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" 
+                               style={{height: `${(superv.totalNuevos / maxGastoSuper) * 100}%`, background: "var(--accent)"}} 
+                               title={buildTooltip(`Nuevos: ${superv.totalNuevos} unidades`, superv.itemsNuevos)}
+                             ></div>
                              
-                             <div className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" style={{height: `${(superv.totalLavados / maxGastoSuper) * 100}%`, background: "var(--ok)"}} title={`Lavados: ${superv.totalLavados} unidades`}></div>
+                             {/* BARRA LAVADOS */}
+                             <div 
+                               className="w-[12px] sm:w-[16px] rounded-t rise-vertical cursor-pointer opacity-90 hover:opacity-100 transition-opacity" 
+                               style={{height: `${(superv.totalLavados / maxGastoSuper) * 100}%`, background: "var(--ok)"}} 
+                               title={buildTooltip(`Lavados: ${superv.totalLavados} unidades`, superv.itemsLavados)}
+                             ></div>
                              
                            </div>
 
@@ -752,30 +771,54 @@ function App(){
               </div>
             )}
 
+            {/* NUEVA SECCIÓN: ENTREGAS POR OPERARIO (Reemplaza "Consumo por Categoría") */}
             {isAdmin && (
               <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="font-display text-base font-semibold">Stock por categoría</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+                  <div className="flex items-center gap-2">
+                    <IconLayers className="w-5 h-5" style={{color:"var(--accent)"}} />
+                    <h2 className="font-display text-base font-semibold">Entregas por Operario</h2>
+                  </div>
+                  <input type="month" value={mesOperarios} onChange={e => setMesOperarios(e.target.value)} className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none" style={{color:"var(--ink-1)"}} />
                 </div>
-                {stockPorCategoria.length === 0 && <p className="text-sm py-4 text-center" style={{color:"var(--ink-3)"}}>Agregá tu primer ingreso para ver las métricas.</p>}
-                <div className="space-y-4">
-                  {stockPorCategoria.map(r => (
-                    <StockGauge key={r.cat.id} cat={r.cat} actual={r.actual} max={maxCategoria} />
-                  ))}
-                </div>
+
+                {entregasOperarios.length === 0 ? (
+                  <p className="text-sm py-6 text-center" style={{color:"var(--ink-3)"}}>No hay entregas registradas en este mes.</p>
+                ) : (
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                    {entregasOperarios.map(op => (
+                      <details key={op.nombre} className="group glass-tight rounded-xl overflow-hidden transition-all">
+                        <summary className="p-4 cursor-pointer outline-none hover:bg-white/5 transition-colors flex items-center justify-between">
+                          <span className="text-sm font-semibold" style={{color:"var(--ink-1)"}}>{op.nombre}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-xs" style={{color:"var(--ink-2)"}}>{op.total} un</span>
+                            <svg className="w-4 h-4 transition-transform group-open:rotate-180" style={{color:"var(--ink-3)"}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+                          </div>
+                        </summary>
+                        <div className="px-4 pb-4 pt-2 border-t text-sm space-y-1" style={{borderColor:"var(--glass-brd)"}}>
+                          {Object.entries(op.items).sort((a,b)=>b[1]-a[1]).map(([nom, cant]) => (
+                            <div key={nom} className="flex justify-between py-1.5 border-b last:border-0" style={{borderColor:"var(--glass-brd)"}}>
+                               <span style={{color:"var(--ink-2)"}}>{nom}</span>
+                               <span className="font-mono font-medium text-xs" style={{color:"var(--ink-1)"}}>{cant}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
             {isAdmin && (
               <div className="glass rounded-2xl p-5 sm:p-6 fade-up">
                 <div className="flex items-center justify-between mb-5">
-                  <h2 className="font-display text-base font-semibold">Consumo histórico por categoría</h2>
-                  <input type="month" value={mesHistorico} onChange={e => setMesHistorico(e.target.value)} className="glass-tight rounded-lg px-3 py-1.5 text-sm outline-none" style={{color:"var(--ink-1)"}} />
+                  <h2 className="font-display text-base font-semibold">Stock actual por categoría</h2>
                 </div>
-                {consumosHistoricos.length === 0 && <p className="text-sm py-6 text-center" style={{color:"var(--ink-3)"}}>No hay consumos registrados en este mes.</p>}
+                {stockPorCategoria.length === 0 && <p className="text-sm py-4 text-center" style={{color:"var(--ink-3)"}}>Agregá tu primer ingreso para ver las métricas.</p>}
                 <div className="space-y-4">
-                  {consumosHistoricos.map(r => (
-                    <StockGauge key={r.cat.id} cat={r.cat} actual={r.total} max={maxHistorico} />
+                  {stockPorCategoria.map(r => (
+                    <StockGauge key={r.cat.id} cat={r.cat} actual={r.actual} max={maxCategoria} />
                   ))}
                 </div>
               </div>
@@ -1022,7 +1065,7 @@ function App(){
         </div>
       )}
 
-      {/* MODAL DE CONSUMO ANUAL DE CATEGORÍAS (AHORA DESPLEGABLE) */}
+      {/* MODAL DE CONSUMO ANUAL DE CATEGORÍAS (ACORDEÓN) */}
       {isAdmin && showCategoriasModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-up" style={{background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)"}}>
           <div className="glass rounded-2xl p-6 w-full max-w-lg max-h-[85vh] flex flex-col">
